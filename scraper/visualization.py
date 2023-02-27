@@ -14,7 +14,8 @@ st.write(f"{test_xml.tests - test_xml.errors} succeeded.")
 
 top20_ratings_location = os.environ.get("OUTPUT_LOCATION")
 
-df = pd.read_csv(f"{top20_ratings_location}/top20_movies_corrected_ratings.csv")
+raw_df = pd.read_csv(f"{top20_ratings_location}/top20_movies_corrected_ratings.csv")
+df = raw_df.copy(deep=True)
 df.drop("review_penalty", axis=1, inplace=True)
 df.drop("oscar_bins", axis=1, inplace=True)
 df.columns = [
@@ -34,3 +35,17 @@ df = df[[
 
 st.subheader("TOP 20 movies with corrected ratings.")
 st.dataframe(df)
+
+@st.cache_data
+def convert_df(df):
+   return df.to_csv(index=False).encode('utf-8')
+
+file_to_download = convert_df(raw_df)
+
+st.download_button(
+   "Press to Download the raw CSV file.",
+   file_to_download,
+   "imdb_top20_corrected_ratings.csv",
+   "text/csv",
+   key='download-csv'
+)
