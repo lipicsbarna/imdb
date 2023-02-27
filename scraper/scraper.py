@@ -145,5 +145,5 @@ def df_from_movie_info(
 def calculate_review_penalty(df: pd.DataFrame) -> pd.DataFrame:
     max_votes = df["nr_of_votes"].max()
     
-    df["review_penalty"] = df["nr_of_votes"].apply(lambda x: floor((max_votes - x) / 100000) * 0.1)
+    df["review_penalty"] = df["nr_of_votes"].apply(lambda x: round(floor((max_votes - x) / 100000) * 0.1, 1))
     return df
