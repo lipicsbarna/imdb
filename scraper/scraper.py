@@ -8,26 +8,16 @@ import logging
 import sys
 from dataclasses import dataclass
 from math import floor
+import os
+
+OUTPUT_LOCATION = os.environ.get("OUTPUT_LOCATION")
+if OUTPUT_LOCATION is None:
+    raise ValueError("Could not resolve file output location from env variables.")
 
 urllib3.disable_warnings()
 
 URL = 'https://www.imdb.com/chart/top'
 TOP_NR_TO_TAKE = 20
-
-logging.basicConfig(
-    format="%(asctime)s %(name)s:%(levelname)s %(message)s",
-    level=logging.INFO,
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-logger = logging.getLogger("imdbscraper")
-
-try:
-    response = requests.get(URL, verify=False)
-    soup = BeautifulSoup(response.text, "html.parser")
-    logger.info("IMDB page loaded to scraper")
-except:
-    logger.error("Error at loading IMDB page to scraper")
-    raise
 
 # If we had more data I would optimise the iteration algorithm
 def extract_movie_title(movie: Tag) -> str:
@@ -147,3 +137,107 @@ def calculate_review_penalty(df: pd.DataFrame) -> pd.DataFrame:
     
     df["review_penalty"] = df["nr_of_votes"].apply(lambda x: round(floor((max_votes - x) / 100000) * 0.1, 1))
     return df
+
+def bin_oscars(nr_of_oscars: int):
+    if nr_of_oscars < 0:
+        raise ValueError(f"Nr of oscars is negative: {nr_of_oscars}")
+    elif not isinstance(nr_of_oscars, int):
+        raise TypeError("Type mismatch, nr_of_oscars should be integer.")
+    elif nr_of_oscars == 0:
+        return 0
+    elif nr_of_oscars in {1, 2}:
+        return 0.3
+    elif nr_of_oscars >= 3 and nr_of_oscars <=5:
+        return 0.5
+    elif nr_of_oscars >= 6 and nr_of_oscars <= 10:
+        return 1
+    else:
+        return 1.5
+    
+def add_oscar_modifier_to_df(df: pd.DataFrame):
+    
+    df["oscar_bins"] = df["nr_of_oscars"].apply(lambda x: bin_oscars(x) )
+    return df
+
+def correct_movie_rating(df: pd.DataFrame):
+
+    df["corrected_rating"] = df["rating"] - df["review_penalty"] + df["oscar_bins"]
+    return df.sort_values("corrected_rating", ascending=False)
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        format="%(asctime)s %(name)s:%(levelname)s %(message)s",
+        level=logging.INFO,
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    logger = logging.getLogger("imdbscraper")
+
+    try:
+        response = requests.get(URL, verify=False)
+        soup = BeautifulSoup(response.text, "html.parser")
+        logger.info("IMDB page loaded to scraper")
+    except:
+        logger.error("Error at loading IMDB page to scraper")
+        raise
+
+    try:
+        movie_titles: list[str] = extract_movie_titles(soup)[0:TOP_NR_TO_TAKE]
+        logger.info("Movie titles are extracted.")
+    
+        ratings: list[float] = extract_ratings(soup)[0:TOP_NR_TO_TAKE]
+        logger.info("Movie ratings are extracted.")
+    
+        nr_of_votes: list[int] = extract_nr_of_votes(soup)[0:TOP_NR_TO_TAKE]
+        logger.info("Number of votes are extracted.")
+
+        movie_hrefs: list[str] = extract_movie_hrefs(soup)[0:TOP_NR_TO_TAKE]
+        logger.info("Movie urls are extracted.")
+        nr_of_oscars = [
+            extract_nr_of_oscars(movie_url=f"https://www.imdb.com{url}", logger=logger) 
+            for url in movie_hrefs
+        ]
+        logger.info("Number of oscars are extracted")
+    except:
+        logger.error("Failed to extract movie info.")
+        raise
+    
+
+    validate_movie_params(
+        top_nr_to_take=TOP_NR_TO_TAKE,
+        movie_titles=movie_titles,
+        ratings=ratings,
+        nr_of_votes=nr_of_votes,
+        nr_of_oscars=nr_of_oscars,
+        logger=logger
+    )
+    logging.info("Validating is OK.")
+
+    try:
+        df: pd.DataFrame = df_from_movie_info(
+            movie_titles,
+            ratings,
+            nr_of_votes,
+            nr_of_oscars,
+            TOP_NR_TO_TAKE,
+            logger
+        )
+    except:
+        logger.error("Failed to generate dataframe from movie attributes.")
+        raise
+
+    try:
+        df_with_review_penalties: pd.DataFrame = calculate_review_penalty(df)
+        df_with_penalties_and_oscar_modifiers: pd.DataFrame = add_oscar_modifier_to_df(df_with_review_penalties)
+        df_corrected_ratings: pd.DataFrame = correct_movie_rating(df_with_penalties_and_oscar_modifiers)
+        logger.info("Corrected ratings are calculated.")
+
+    except:
+        logger.error("Generating corrected ratings failed.")
+        raise
+
+    try:
+        df_corrected_ratings.to_csv(f"{OUTPUT_LOCATION}/top20_movies_corrected_ratings.csv", index=False)
+        logger.info(f"Successfully written data to location: {OUTPUT_LOCATION}")
+    except:
+        logger.error(f"Failed to write end results to location: {OUTPUT_LOCATION}")
+        raise

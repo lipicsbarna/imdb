@@ -1,5 +1,7 @@
 pandas
 pytest
-pytest-cov
 bs4
 requests
+streamlit
+junitparser
+lxml

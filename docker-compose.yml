@@ -1,0 +1,6 @@
+version: "1.0"
+services:
+  imdb-scraper:
+    build: .
+    ports:
+      - "8501:8501"
